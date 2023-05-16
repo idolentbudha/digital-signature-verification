@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Web Application</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"
+      integrity="sha512-95iy0RZIbw3H/FgfAj2wnCQJlzFQ+eaSfUeV/l8WVyGHKSRMzm3M/O+85j9ba/HFphkijrCTDjcuDX0BL2lthA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+  </head>
+  <body>
+    <div style="flex: 1">
+      <form style="padding: 10px">
+        <label>Amount:</label>
+        <input
+          id="name"
+          type="number"
+          min="0"
+          style="height: 20px; width: 200px"
+          required
+        />
+
+        <button id="submit" style="padding: 4px; width: 100px">Pay</button>
+      </form>
+
+      <br />
+      <br />
+      <br />
+
+      <textarea
+        id="digital_signature"
+        type="text"
+        style="width: 500px; height: 100px"
+      >
+      ZAU7vEa2Vrcu/tfwTmLNRgpn80BdrpyGKTypHW6ZjYbKJ+6hyUy4YIzRhGpUe5aRB0zAa6mtpJ8T7NXvn5VYnCpaKM+1CW1xJU+KEzVbrrTmGmAr6qNn4Ad8tcJV4tQTndYptCbwQOTQMBkThd+OIuzMMFEQl2AtRKWp6SDDhvj2DTNTgVlX+5Mf2ZNRw3zs8Uc0QSBNiu026ldbsFcDubMSjVZpc4Q38UNkFgRpUwBmcNo9qjt/tp82EMTuhQ7byaU1syZwi7/6diMdIE46rmwzKjvn+9TlRWCDDJeLmmVJVILW09Es2md69pZunw0p6CuvVQUzO0DA8wcxXdN3Lg==
+    </textarea
+      >
+      <button id="verify">verify given signature</button>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+      window.addEventListener("message", function (event) {
+        // Check that the message type is correct (optional)
+        if (event.data.type === "myMessageTypeReturn") {
+          const responseMessage = JSON.parse(event.data.data);
+          console.log(event.data.data);
+          alert(
+            JSON.stringify({
+              ...responseMessage,
+              amount: responseMessage.amount / 100,
+            })
+          );
+          return;
+        }
+      });
+
+      // Data to sign
+      const DATA_TO_SIGN = "hello there";
+      const PFX_PASSWORD = "Password@123";
+      // Function to create a digital signature using the private key
+      function createDigitalSignature(privateKey, dataToSign) {
+        var md = forge.md.sha256.create();
+        md.update(dataToSign, "utf8");
+        var hash = md.digest();
+
+        var pss = forge.pss.create({
+          md: forge.md.sha256,
+          mgf: forge.mgf.mgf1.create(forge.md.sha256),
+          saltLength: 32,
+        });
+
+        var privateKeyPem = forge.pki.privateKeyToPem(privateKey);
+
+        var privateKeyObj = forge.pki.privateKeyFromPem(privateKeyPem);
+
+        var signature = privateKeyObj.sign(hash, pss);
+
+        return signature;
+      }
+
+      function getBase64DigitalSignatureUsingPem(privateKeyPem, dataToSign) {
+        var privateKeyObj = forge.pki.privateKeyFromPem(privateKeyPem);
+
+        var md = forge.md.sha256.create();
+        md.update(dataToSign, "utf8");
+
+        const signature = privateKeyObj.sign(md);
+        const base64Signature = forge.util.encode64(signature);
+        return base64Signature;
+      }
+
+      function getPrivateKey(arrayBuffer) {
+        var pfxData = arrayBuffer;
+        console.log("arrayBuffer:", arrayBuffer);
+        var uint8Array = new Uint8Array(pfxData);
+
+        // Convert the Uint8Array to a Forge ByteBuffer
+        var byteBuffer = forge.util.createBuffer(uint8Array);
+
+        // Load the PKCS#12 file using Forge
+        var p12Asn1 = forge.asn1.fromDer(byteBuffer.getBytes());
+        var p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, PFX_PASSWORD);
+
+        /*
+        get by type Keybag
+        */
+
+        var bags = p12.getBags({
+          bagType: forge.pki.oids.pkcs8ShroudedKeyBag,
+        });
+
+        var privateKey = bags["1.2.840.113549.1.12.10.1.2"][0].key;
+
+        // convert a Forge private key to an ASN.1 RSAPrivateKey
+        const rsaPrivateKey = forge.pki.privateKeyToAsn1(privateKey);
+
+        // wrap an RSAPrivateKey ASN.1 object in a PKCS#8 ASN.1 PrivateKeyInfo
+        const privateKeyInfo = forge.pki.wrapRsaPrivateKey(rsaPrivateKey);
+
+        // convert a PKCS#8 ASN.1 PrivateKeyInfo to PEM
+        const pem = forge.pki.privateKeyInfoToPem(privateKeyInfo);
+        return pem;
+      }
+
+      function getPublicKey(arrayBuffer) {
+        var pfxData = arrayBuffer;
+        console.log("arrayBuffer:", arrayBuffer);
+        var uint8Array = new Uint8Array(pfxData);
+
+        // Convert the Uint8Array to a Forge ByteBuffer
+        var byteBuffer = forge.util.createBuffer(uint8Array);
+
+        // Load the PKCS#12 file using Forge
+        var p12Asn1 = forge.asn1.fromDer(byteBuffer.getBytes());
+        var p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, PFX_PASSWORD);
+
+        // Get the bags containing the public key
+        const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+
+        let publicKey;
+        // Iterate over the certificate bags
+        certBags[forge.pki.oids.certBag].forEach(function (certBag) {
+          // Extract the public key from the bag
+          publicKey = certBag.cert.publicKey;
+        });
+
+        return publicKey;
+      }
+
+      function readPfxFile() {
+        //test
+        // Assuming you have the URL or file path of the PKCS#12 file
+        var pkcs12FileURL = "/certificate.pfx";
+
+        // Fetch the PKCS#12 file as a binary response
+        return fetch(pkcs12FileURL).then((response) => response.arrayBuffer());
+      }
+
+      $(document).ready(function () {
+        $("#verify").click(function () {
+          const givenSignaturebase64 = $("#digital_signature").val();
+          const givenSignature = forge.util.decode64(givenSignaturebase64);
+
+          readPfxFile()
+            .then((arrayBuffer) => {
+              // Use the PKCS#12 file data as an ArrayBuffer
+              const pubKey = getPublicKey(arrayBuffer);
+
+              const pr = getPrivateKey(arrayBuffer);
+
+              const md = forge.md.sha256.create();
+              md.update(DATA_TO_SIGN, "utf8");
+
+              const isVerified = pubKey.verify(
+                md.digest().getBytes(),
+                givenSignature
+              );
+
+              alert("isVerified:" + isVerified);
+            })
+            .catch((error) => {
+              console.error("Error fetching PKCS#12 file:", error);
+            });
+        });
+
+        $("#submit").click(function () {
+          var name = $("#name").val();
+          readPfxFile()
+            .then((arrayBuffer) => {
+              // Use the PKCS#12 file data as an ArrayBuffer
+              const pem = getPrivateKey(arrayBuffer);
+
+              // Create the digital signature using the private key
+              var signature = getBase64DigitalSignatureUsingPem(
+                pem,
+                DATA_TO_SIGN
+              );
+
+              console.log("Digital Signature:", signature);
+            })
+            .catch((error) => {
+              console.error("Error fetching PKCS#12 file:", error);
+            });
+        });
+      });
+    </script>
+  </body>
+</html>
